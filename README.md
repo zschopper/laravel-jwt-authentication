@@ -1,66 +1,294 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# 
+[Source](https://jurin.medium.com/securing-laravel-10-api-using-jwt-a5b6dca58fd7)
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+## Step 1 - Download the necessary library
 
-## About Laravel
+```
+composer require php-open-source-saver/jwt-auth
+```
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+## Step 2 - Publish its stuff
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+```php
+php artisan vendor:publish --provider="PHPOpenSourceSaver\JWTAuth\Providers\LaravelServiceProvider"
+```
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+## Step 3 - Generate JWT secret key
 
-## Learning Laravel
+```
+php artisan jwt:secret
+```
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+## Step 4 - Setting up the Auth.php
 
-You may also try the [Laravel Bootcamp](https://bootcamp.laravel.com), where you will be guided through building a modern Laravel application from scratch.
+Open `auth.php`config, add the following code in guards section.
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains over 2000 video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+```php
+'guards' => [
+    ...,
+    'api' => [
+        'driver' => 'jwt',
+        'provider' => 'users',
+    ],
+]
+```
 
-## Laravel Sponsors
+## Step 5 - Update User.php
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+```php
+use PHPOpenSourceSaver\JWTAuth\Contracts\JWTSubject;
 
-### Premium Partners
+class User extends Authenticatable implements JWTSubject
+{
 
-- **[Vehikl](https://vehikl.com/)**
-- **[Tighten Co.](https://tighten.co)**
-- **[WebReinvent](https://webreinvent.com/)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel/)**
-- **[Cyber-Duck](https://cyber-duck.co.uk)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Jump24](https://jump24.co.uk)**
-- **[Redberry](https://redberry.international/laravel/)**
-- **[Active Logic](https://activelogic.com)**
-- **[byte5](https://byte5.de)**
-- **[OP.GG](https://op.gg)**
+   public function getJWTIdentifier()
+    {
+      return $this->getKey();
+    }
 
-## Contributing
+    public function getJWTCustomClaims()
+    {
+      return [
+        'email'=>$this->email,
+        'name'=>$this->name
+      ];
+    }
+}
+```
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+## Step 6 - Create the Auth Controller
 
-## Code of Conduct
+```
+php artisan make:controller AuthController
+```
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+## Step 7 - Setup the Auth Controller
 
-## Security Vulnerabilities
+```php
+<?php
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+namespace App\Http\Controllers;
 
-## License
+use App\Models\User;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Hash;
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+class AuthController extends Controller
+{
+
+    public function __construct()
+    {
+        $this->middleware('auth:api', ['except' => ['login','register','refresh','logout']]);
+    }
+
+    public function register(Request $request){
+        $request->validate([
+            'name' => 'required|string|max:255',
+            'email' => 'required|string|email|max:255|unique:users',
+            'password' => 'required|string|min:6',
+        ]);
+
+        $user = User::create([
+            'name' => $request->name,
+            'email' => $request->email,
+            'password' => Hash::make($request->password),
+        ]);
+
+        $token = Auth::guard('api')->login($user);
+        return response()->json([
+            'status' => 'success',
+            'message' => 'User created successfully',
+            'user' => $user,
+            'authorisation' => [
+                'token' => $token,
+                'type' => 'bearer',
+            ]
+        ]);
+    }
+
+    public function login(Request $request)
+    {
+        $request->validate([
+            'email' => 'required|string|email',
+            'password' => 'required|string',
+        ]);
+        $credentials = $request->only('email', 'password');
+
+        $token = Auth::guard('api')->attempt($credentials);
+        if (!$token) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Unauthorized',
+            ], 401);
+        }
+
+        $user = Auth::guard('api')->user();
+        return response()->json([
+                'status' => 'success',
+                'user' => $user,
+                'authorisation' => [
+                    'token' => $token,
+                    'type' => 'bearer',
+                ]
+            ]);
+    }
+
+    public function logout()
+    {
+        Auth::guard('api')->logout();
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Successfully logged out',
+        ]);
+    }
+
+    public function refresh()
+    {
+        return response()->json([
+            'status' => 'success',
+            'user' => Auth::guard('api')->user(),
+            'authorisation' => [
+                'token' => Auth::guard('api')->refresh(),
+                'type' => 'bearer',
+            ]
+        ]);
+    }
+}
+```
+
+## Step 8 - Setup the routes for api auth
+
+```php
+use App\Http\Controllers\AuthController;
+
+Route::post('register',[AuthController::class,'register']);
+Route::post('login', [AuthController::class,'login']);
+Route::post('refresh', [AuthController::class,'refresh']);
+Route::post('logout', [AuthController::class,'logout']);
+```
+
+## Step 9 - Start the server
+
+```
+php artisan serve
+```
+
+## Step 10 - Testing the api
+
+### register
+
+
+```
+POST http://localhost:8000/api/register
+```
+
+**Request body:**
+
+```json
+{
+    "name": "Admin",
+    "email": "admin@localhost",
+    "password": "ArEm-o9Rpi!ENdE!"
+}
+```
+
+**Response body:**
+
+```json
+{
+    "status": "success",
+    "message": "User created successfully",
+    "user": {
+        "name": "Admin",
+        "email": "admin@localhost",
+        "updated_at": "2023-12-27T23:43:59.000000Z",
+        "created_at": "2023-12-27T23:43:59.000000Z",
+        "id": 1
+    },
+    "authorisation": {
+        "token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJodHRwOi8vbG9jYWxob3N0OjgwMDAvYXBpL3JlZ2lzdGVyIiwiaWF0IjoxNzAzNzIwNjM5LCJleHAiOjE3MDM3MjQyMzksIm5iZiI6MTcwMzcyMDYzOSwianRpIjoiVldJM050d0tWZXBnV05MZiIsInN1YiI6IjEiLCJwcnYiOiIyM2JkNWM4OTQ5ZjYwMGFkYjM5ZTcwMWM0MDA4NzJkYjdhNTk3NmY3IiwiZW1haWwiOiJhZG1pbkBsb2NhbGhvc3QiLCJuYW1lIjoiQWRtaW4ifQ.gDrYdq7W6iFouqwhW0aZPNbxZ4PyvRztHzivq1Np3pU",
+        "type": "bearer"
+    }
+}
+```
+
+### login
+
+```
+POST http://localhost:8000/api/login
+```
+
+**Request body:**
+
+```json
+{
+    "email": "admin@localhost",
+    "password": "ArEm-o9Rpi!ENdE!"
+}
+```
+
+**Response body:**
+
+```json
+{
+    "status": "success",
+    "user": {
+        "id": 1,
+        "name": "Admin",
+        "email": "admin@localhost",
+        "email_verified_at": "2023-12-27T23:36:31.000000Z",
+        "created_at": "2023-12-27T23:36:31.000000Z",
+        "updated_at": "2023-12-27T23:36:31.000000Z"
+    },
+    "authorisation": {
+        "token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJodHRwOi8vbG9jYWxob3N0OjgwMDAvYXBpL2xvZ2luIiwiaWF0IjoxNzAzNzIwMjE4LCJleHAiOjE3MDM3MjM4MTgsIm5iZiI6MTcwMzcyMDIxOCwianRpIjoiUmRkajdNaTFNSTJRcXJhaSIsInN1YiI6IjEiLCJwcnYiOiIyM2JkNWM4OTQ5ZjYwMGFkYjM5ZTcwMWM0MDA4NzJkYjdhNTk3NmY3IiwiZW1haWwiOiJhZG1pbkBsb2NhbGhvc3QiLCJuYW1lIjoiQWRtaW4ifQ.kMB5KbUfNqcNDcAkNBSLDEeD6hO0ZjhSSN9NsSK0JiI",
+        "type": "bearer"
+    }
+}
+```
+
+
+### logout
+
+```
+POST http://localhost:8000/api/logout
+```
+
+**Request header:**
+
+```
+Authentication: bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJodHRwOi8vbG9jYWxob3N0OjgwMDAvYXBpL2xvZ2luIiwiaWF0IjoxNzAzNzIwMjE4LCJleHAiOjE3MDM3MjM4MTgsIm5iZiI6MTcwMzcyMDIxOCwianRpIjoiUmRkajdNaTFNSTJRcXJhaSIsInN1YiI6IjEiLCJwcnYiOiIyM2JkNWM4OTQ5ZjYwMGFkYjM5ZTcwMWM0MDA4NzJkYjdhNTk3NmY3IiwiZW1haWwiOiJhZG1pbkBsb2NhbGhvc3QiLCJuYW1lIjoiQWRtaW4ifQ.kMB5KbUfNqcNDcAkNBSLDEeD6hO0ZjhSSN9NsSK0JiI
+```
+
+***No Request body***
+
+
+**Response body:**
+
+```json
+{
+    "status": "success",
+    "user": {
+        "id": 1,
+        "name": "Admin",
+        "email": "admin@localhost",
+        "email_verified_at": null,
+        "created_at": "2023-12-27T23:43:59.000000Z",
+        "updated_at": "2023-12-27T23:43:59.000000Z"
+    },
+    "authorisation": {
+        "token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJodHRwOi8vbG9jYWxob3N0OjgwMDAvYXBpL2xvZ2luIiwiaWF0IjoxNzAzNzIwOTIxLCJleHAiOjE3MDM3MjQ1MjEsIm5iZiI6MTcwMzcyMDkyMSwianRpIjoiV1dLVXQ4SUMzU2N5dTFObSIsInN1YiI6IjEiLCJwcnYiOiIyM2JkNWM4OTQ5ZjYwMGFkYjM5ZTcwMWM0MDA4NzJkYjdhNTk3NmY3IiwiZW1haWwiOiJhZG1pbkBsb2NhbGhvc3QiLCJuYW1lIjoiQWRtaW4ifQ.hxnAhArzC-FW76rLJXhTI8ChfBYWd19S5fOz2B93NLo",
+        "type": "bearer"
+    }
+}
+```
+
+## Step 11 - Add dependency to the models
+
+```php
+    public function __construct()
+    {
+        $this->middleware('auth:api');
+    }
+```
